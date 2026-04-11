@@ -164,31 +164,30 @@ def parse_fragment(page):
 
 def save_to_getnote(fragment):
     """
-    将碎片保存到 Get 笔记
+    将碎片以纯文本形式保存到 Get 笔记
     """
     title = fragment["title"]
     link = fragment.get("link", "")
     tags = fragment.get("tags", [])
+    created_date = fragment.get("date", "")
 
-    # 构建内容
+    # 构建纯文本内容（不使用链接解析，直接保存文字）
     content_parts = [title]
-    if link:
-        content_parts.append(f"\n来源: {link}")
     if tags:
-        content_parts.append(f"\n标签: {' '.join(['#' + t for t in tags])}")
+        content_parts.append(f"\n\n标签: {' '.join(['#' + t for t in tags])}")
+    if created_date:
+        content_parts.append(f"\n日期: {created_date}")
+    if link:
+        content_parts.append(f"\n\n来源: {link}")
 
     content = "\n".join(content_parts)
 
-    # 调用 Get 笔记 API
+    # 直接保存为文本内容，不用链接解析
     payload = {
-        "title": title[:100] if len(title) > 100 else title,  # 标题限制
+        "title": title[:100] if len(title) > 100 else title,
         "content": content,
-        "note_type": "text" if not link else "link",
-        "link_url": link if link else None
+        "note_type": "text"  # 纯文本，不使用链接解析
     }
-
-    # 移除 None 值
-    payload = {k: v for k, v in payload.items() if v is not None}
 
     req = Request(
         "https://openapi.biji.com/open/api/v1/resource/note/save",
