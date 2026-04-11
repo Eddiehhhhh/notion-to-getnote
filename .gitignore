@@ -1,0 +1,21 @@
+# 忽略本地 processed_ids.json（用 GitHub 仓库的）
+processed_ids_local.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
