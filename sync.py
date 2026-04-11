@@ -290,7 +290,9 @@ def main():
     # 同步每个碎片
     new_processed = set()
     for frag in new_fragments:
-        print(f"\n📝 处理: {frag['title'][:50]}...")
+        # 只打印摘要，不打印完整内容，保护隐私
+        title_short = frag['title'][:30] + "..." if len(frag['title']) > 30 else frag['title']
+        print(f"\n📝 同步笔记: {title_short}")
         if frag.get("link"):
             print(f"   🔗 链接: {frag['link']}")
         if frag.get("tags"):
