@@ -291,9 +291,12 @@ def sync_flomo_to_getnote(state):
     
     print(f"[INFO] 发现 {len(notes_to_sync)} 条新笔记")
     
+    # 来源标记，用于防止循环同步
+    SOURCE_MARKER = "🔄"
+    
     for note in notes_to_sync:
-        # 构建内容
-        content_parts = [note["title"]]
+        # 构建内容（添加来源标记）
+        content_parts = [f"{SOURCE_MARKER}{note['title']}"]
         if note["tags"]:
             content_parts.append(f"\n标签: {' '.join(['#' + t for t in note['tags']])}")
         if note["link"]:
@@ -355,10 +358,32 @@ def sync_getnote_to_flomo(state):
     
     print(f"[INFO] 发现 {len(new_notes)} 条新笔记")
     
+    # 来源标记，用于防止循环同步
+    SOURCE_MARKER = "🔄"
+    
     for note in new_notes:
         note_id = str(note.get("id"))
         title = note.get("title", "")
         content = note.get("content", "")
+        source = note.get("source", "")
+        
+        # 跳过来源是 Flomo 的笔记，避免循环同步
+        if source == "flomo":
+            print(f"[SKIP] 跳过 Flomo 来源的笔记: {note_id}")
+            processed_ids.add(note_id)
+            continue
+        
+        # 跳过包含 flomo URL 的笔记（这些是从 Flomo 同步过来的）
+        if "flomoapp.com" in (content or "") or "flomoapp.com" in (title or ""):
+            print(f"[SKIP] 跳过包含 flomo URL 的笔记: {note_id}")
+            processed_ids.add(note_id)
+            continue
+        
+        # 跳过包含来源标记的笔记（这些是从 Notion 同步过来的，避免循环）
+        if SOURCE_MARKER in (title or "") or SOURCE_MARKER in (content or ""):
+            print(f"[SKIP] 跳过 Notion 来源的笔记: {note_id}")
+            processed_ids.add(note_id)
+            continue
         
         if not title and not content:
             continue
