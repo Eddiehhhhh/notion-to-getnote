@@ -1,5 +1,8 @@
 name: Get笔记 ↔ Flomo 双向同步
 
+permissions:
+  contents: write
+
 on:
   # 每30分钟运行一次
   schedule:
