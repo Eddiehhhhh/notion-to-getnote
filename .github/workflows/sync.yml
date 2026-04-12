@@ -4,9 +4,9 @@ permissions:
   contents: write
 
 on:
-  # 每30分钟运行一次
-  schedule:
-    - cron: '*/30 * * * *'
+  # 暂时禁用定时触发 (2026-04-12)
+  # schedule:
+  #   - cron: '*/30 * * * *'
   # 支持手动触发
   workflow_dispatch:
   # 支持 repository_dispatch
