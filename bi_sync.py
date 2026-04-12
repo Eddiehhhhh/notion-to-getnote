@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """
-Get笔记 ↔ Flomo 双向同步 - 防循环版本
-=====================================
+Get笔记 ↔ Flomo 双向同步 - 防循环版本 v2
+=========================================
 核心逻辑：
 1. Flomo → Get笔记：从 Notion 碎片中心读取，跳过带"✅来自Flomo"标签的笔记
-2. Get笔记 → Flomo：跳过带"🔄已同步Flomo"标记的笔记，防止循环
+2. Get笔记 → Flomo：跳过带🔄标记/flomo URL/✅已同步Flomo标签的笔记，防止循环
+
+防护机制（多层保险）：
+1. 内容哈希去重（不只是 ID）
+2. 标记跳过：🔄、✅已同步Flomo、flomo URL
+3. 来源跳过：source="flomo"
+4. 状态持久化：processed_hashes 记录已同步的内容哈希
 
 数据流：
-  Flomo ──(用户自己的同步)──▶ Notion 碎片中心
-                                      │
-                                      ▼
-                               Notion → Get笔记 (加 🔄 标记)
-                                      │
-                                      ▼
-                               Get笔记 → Flomo (跳过 🔄 标记)
+  Flomo ──(用户同步)──▶ Notion 碎片中心
+                                 │
+                                 ▼
+                          Notion → Get笔记 (加 🔄 标记)
+                                 │
+                                 ▼
+                          Get笔记 → Flomo (跳过 🔄 标记)
 """
 
 import json
@@ -21,6 +27,7 @@ import os
 import ssl
 import time
 import re
+import hashlib
 from datetime import datetime, timedelta, timezone
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
@@ -50,6 +57,18 @@ MARKER_FROM_FLOMO = "🔄"
 # 标记：已同步到 Flomo 的笔记（同步到 Flomo 时添加，防止循环）
 MARKER_SYNCED_TO_FLOMO = "✅"
 
+# 同步来源标记：用于标记笔记是从 Get笔记 同步到 Flomo 的
+# 格式：[getnote-sync:ID]，用于识别循环同步
+MARKER_GETNOTE_SOURCE = "[getnote-sync]"
+
+
+# ============ 内容哈希去重 ============
+
+def compute_content_hash(title, content):
+    """计算内容哈希，用于去重"""
+    raw = f"{title or ''}|{content or ''}"
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()[:16]
+
 
 # ============ 辅助函数 ============
 
@@ -64,7 +83,9 @@ def load_state():
     return {
         "last_getnote_cursor": "0",
         "processed_getnote_ids": [],
-        "processed_notion_ids": []
+        "processed_getnote_hashes": [],  # 内容哈希去重
+        "processed_notion_ids": [],
+        "processed_notion_hashes": []     # 内容哈希去重
     }
 
 
@@ -241,16 +262,18 @@ def sync_flomo_to_getnote(state):
     从 Notion 碎片中心读取 Flomo 笔记，同步到 Get 笔记
     
     防护逻辑：
-    1. 跳过 Notion 中已有 "✅来自Flomo" 标签的笔记（已在 Get笔记 中）
-    2. 同步时在 Get笔记 中添加 🔄 标记
+    1. 跳过已有 "✅来自Flomo" 标签的笔记
+    2. 跳过已有 "✅已同步Flomo" 标签的笔记（防止循环回来的）
+    3. 内容哈希去重（即使 ID 不同，内容相同也不重复同步）
+    4. 同步时在 Get笔记 中添加 🔄 标记
     """
     print("\n" + "=" * 50)
     print("📤 Flomo → Get笔记 同步")
     print("=" * 50)
     
-    # 计算时间范围（过去 2 小时内的笔记）
+    # 计算时间范围（过去 1 小时内，避免重复处理）
     now = datetime.now(timezone.utc)
-    start_time = now - timedelta(hours=2)
+    start_time = now - timedelta(hours=1)
     start_str = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
     
     # 查询最近的笔记
@@ -279,11 +302,9 @@ def sync_flomo_to_getnote(state):
     # 收集需要同步的笔记
     notes_to_sync = []
     processed_ids = set(state.get("processed_notion_ids", []))
+    processed_hashes = set(state.get("processed_notion_hashes", []))
     
     for page in data["results"]:
-        if page.get("id") in processed_ids:
-            continue
-            
         props = page.get("properties", {})
         
         # 提取标题
@@ -298,10 +319,36 @@ def sync_flomo_to_getnote(state):
         # 提取链接
         link = props.get("Link", {}).get("url", "")
         
-        # ===== 防护：跳过带有 "✅来自Flomo" 标签的笔记 =====
-        # 这些笔记已经同步到过 Get笔记，不需要再次同步
+        # 计算内容哈希
+        content_hash = compute_content_hash(title, link)
+        
+        # ===== 防护1：跳过已处理的 ID =====
+        if page.get("id") in processed_ids:
+            continue
+        
+        # ===== 防护2：跳过已有 "✅来自Flomo" 标签的笔记 =====
         if "✅来自Flomo" in tags:
             print(f"[SKIP] 跳过已有同步标记的笔记: {title[:30]}...")
+            processed_ids.add(page.get("id"))
+            continue
+        
+        # ===== 防护3：跳过已有 "✅已同步Flomo" 标签的笔记（防止循环回来的） =====
+        if "✅已同步Flomo" in tags:
+            print(f"[SKIP] 跳过已从Get笔记同步的笔记: {title[:30]}...")
+            processed_ids.add(page.get("id"))
+            continue
+        
+        # ===== 防护4：跳过包含 [getnote-sync] 标记的笔记 =====
+        # 这些笔记是从 Get笔记 同步到 Flomo，又被同步到 Notion 的，不需要再同步回 Get笔记
+        full_text = f"{title} {link}"
+        if MARKER_GETNOTE_SOURCE in full_text:
+            print(f"[SKIP-4] 来自Get笔记标记: {title[:30]}...")
+            processed_ids.add(page.get("id"))
+            continue
+        
+        # ===== 防护5：内容哈希去重 =====
+        if content_hash in processed_hashes:
+            print(f"[SKIP-5] 跳过内容重复的笔记: {title[:30]}...")
             processed_ids.add(page.get("id"))
             continue
         
@@ -310,7 +357,8 @@ def sync_flomo_to_getnote(state):
                 "id": page.get("id"),
                 "title": title,
                 "tags": tags,
-                "link": link
+                "link": link,
+                "content_hash": content_hash
             })
     
     if not notes_to_sync:
@@ -330,7 +378,7 @@ def sync_flomo_to_getnote(state):
         content = "\n".join(content_parts)
         
         # 保存到 Get 笔记
-        print(f"[INFO] 同步笔记...")
+        print(f"[INFO] 同步笔记: {note['title'][:30]}...")
         result = getnote_request("/resource/note/save", {
             "title": note["title"][:100],
             "content": content,
@@ -340,12 +388,15 @@ def sync_flomo_to_getnote(state):
         if result and result.get("success"):
             print(f"[INFO] 同步成功")
             processed_ids.add(note["id"])
+            processed_hashes.add(note["content_hash"])
         else:
-            print(f"[WARN] 同步失败")
+            print(f"[WARN] 同步失败: {result}")
         
         time.sleep(1)
     
-    state["processed_notion_ids"] = list(processed_ids)[-100:]
+    # 保留最近 200 条记录
+    state["processed_notion_ids"] = list(processed_ids)[-200:]
+    state["processed_notion_hashes"] = list(processed_hashes)[-200:]
     return state
 
 
@@ -355,10 +406,14 @@ def sync_getnote_to_flomo(state):
     """
     从 Get 笔记读取新笔记，用 AI 匹配标签后同步到 Flomo
     
-    防护逻辑：
-    1. 跳过 source="flomo" 的笔记
-    2. 跳过包含 🔄 标记的笔记（这些是从 Flomo 同步过来的）
-    3. 同步到 Flomo 时在内容中添加 ✅ 标记
+    防护逻辑（多层保险）：
+    1. source="flomo" - 直接跳过
+    2. 包含 flomo URL - 跳过
+    3. 包含 🔄 标记 - 跳过（来自 Flomo 的）
+    4. 包含 ✅ 已同步Flomo 标记 - 跳过
+    5. 内容哈希去重 - 即使 ID 不同，内容相同也不重复
+    
+    内容格式：标题作为正文第一行，然后换行接主体
     """
     global FLOMO_TAGS
     
@@ -366,9 +421,8 @@ def sync_getnote_to_flomo(state):
     print("📥 Get笔记 → Flomo 同步")
     print("=" * 50)
     
-    # 获取笔记列表 (使用 GET 方法)
-    cursor = state.get("last_getnote_cursor", "0")
-    result = getnote_request("/resource/note/list?since_id=0&limit=20", method="GET")
+    # 获取笔记列表 (使用 GET 方法，只取最新 10 条减少重复风险)
+    result = getnote_request("/resource/note/list?since_id=0&limit=10", method="GET")
     
     if not result or not result.get("success"):
         print(f"[ERROR] 获取 Get 笔记失败")
@@ -380,69 +434,106 @@ def sync_getnote_to_flomo(state):
         return state
     
     processed_ids = set(state.get("processed_getnote_ids", []))
-    new_notes = [n for n in notes if str(n.get("id")) not in processed_ids]
+    processed_hashes = set(state.get("processed_getnote_hashes", []))
+    
+    # 过滤并记录所有检查过的笔记
+    new_notes = []
+    for n in notes:
+        note_id = str(n.get("id"))
+        
+        # 已处理过则跳过
+        if note_id in processed_ids:
+            continue
+            
+        new_notes.append(n)
     
     if not new_notes:
         print("[INFO] 没有新的笔记需要同步")
         return state
     
-    print(f"[INFO] 发现 {len(new_notes)} 条新笔记")
+    print(f"[INFO] 发现 {len(new_notes)} 条新笔记待检查")
     
     sync_count = 0
     skip_count = 0
     
     for note in new_notes:
         note_id = str(note.get("id"))
-        title = note.get("title", "")
-        content = note.get("content", "")
-        source = note.get("source", "")
+        note_id_md5 = str(note.get("md5_id", note_id))  # 备用 ID
+        title = note.get("title", "") or ""
+        content = note.get("content", "") or ""
+        source = note.get("source", "") or ""
+        
+        # 计算内容哈希
+        content_hash = compute_content_hash(title, content)
         
         # ===== 防护1：跳过来源是 Flomo 的笔记 =====
         if source == "flomo":
-            print(f"[SKIP] 跳过 Flomo 来源的笔记: {note_id}")
+            print(f"[SKIP-1] Flomo 来源: {title[:30] if title else content[:30]}...")
             processed_ids.add(note_id)
-            skip_count += 1
             continue
         
         # ===== 防护2：跳过包含 flomo URL 的笔记 =====
-        if "flomoapp.com" in (content or "") or "flomoapp.com" in (title or ""):
-            print(f"[SKIP] 跳过包含 flomo URL 的笔记: {note_id}")
+        if "flomoapp.com" in content or "flomoapp.com" in title:
+            print(f"[SKIP-2] 包含flomo链接: {title[:30] if title else content[:30]}...")
             processed_ids.add(note_id)
-            skip_count += 1
             continue
         
         # ===== 防护3：跳过包含 🔄 标记的笔记 =====
         # 这些笔记是从 Flomo 同步过来的，避免循环同步回 Flomo
-        if MARKER_FROM_FLOMO in (title or "") or MARKER_FROM_FLOMO in (content or ""):
-            print(f"[SKIP] 跳过已同步Flomo的笔记: {note_id}")
+        if MARKER_FROM_FLOMO in title or MARKER_FROM_FLOMO in content:
+            print(f"[SKIP-3] 来自Flomo标记: {title[:30] if title else content[:30]}...")
             processed_ids.add(note_id)
-            skip_count += 1
+            continue
+        
+        # ===== 防护4：跳过包含 ✅ 已同步Flomo 标记的笔记 =====
+        # 防止同一个笔记被多次同步到 Flomo
+        if MARKER_SYNCED_TO_FLOMO in title or MARKER_SYNCED_TO_FLOMO in content:
+            print(f"[SKIP-4] 已同步Flomo标记: {title[:30] if title else content[:30]}...")
+            processed_ids.add(note_id)
+            continue
+        
+        # ===== 防护5：内容哈希去重 =====
+        if content_hash in processed_hashes:
+            print(f"[SKIP-5] 内容重复: {title[:30] if title else content[:30]}...")
+            processed_ids.add(note_id)
             continue
         
         if not title and not content:
             skip_count += 1
+            processed_ids.add(note_id)
             continue
         
-        # 拼接内容：标题作为第一句话，然后换行接主体
+        # ===== 构建发送到 Flomo 的内容 =====
+        # 标题作为正文第一行，然后换行接主体
         if title and content:
-            display_content = f"{title}\n\n{content}"
+            # 如果内容已经以标题开头，避免重复
+            if content.startswith(title):
+                display_content = content
+            else:
+                display_content = f"{title}\n\n{content}"
         elif title:
             display_content = title
         else:
             display_content = content
         
-        display_content = display_content[:1000]  # 限制长度
+        display_content = display_content[:1000]  # Flomo 限制长度
+        
+        # ===== 添加唯一标记，防止循环同步 =====
+        # 在内容末尾添加 [getnote-sync:ID]，这样当这条笔记从 Flomo 同步回来时可以被识别
+        sync_marker = f"\n\n{MARKER_GETNOTE_SOURCE}:{note_id}"
         
         # 用 AI 匹配标签（基于原始内容）
-        print(f"[INFO] AI 匹配标签...")
+        print(f"[INFO] AI 匹配标签: {title[:30] if title else content[:30]}...")
         ai_content = content if content else title
         matched_tags = match_tags_with_ai(ai_content[:500], FLOMO_TAGS)
         
+        # 添加 ✅ 标记，表示已同步到 Flomo（放在开头便于识别）
+        # 添加 [getnote-sync:ID] 标记，用于识别循环同步
         if matched_tags:
             tags_str = " ".join(["#" + tag for tag in matched_tags])
-            final_content = f"{display_content}\n\n{tags_str} {MARKER_SYNCED_TO_FLOMO}"
+            final_content = f"{MARKER_SYNCED_TO_FLOMO} {tags_str}\n\n{display_content}{sync_marker}"
         else:
-            final_content = f"{display_content}\n\n{MARKER_SYNCED_TO_FLOMO}"
+            final_content = f"{MARKER_SYNCED_TO_FLOMO}\n\n{display_content}{sync_marker}"
         
         # 发送到 Flomo
         print(f"[INFO] 发送到 Flomo...")
@@ -451,19 +542,17 @@ def sync_getnote_to_flomo(state):
         if result and result.get("code") == 0:
             print(f"[INFO] 同步成功 (标签: {matched_tags})")
             processed_ids.add(note_id)
+            processed_hashes.add(content_hash)
             sync_count += 1
         else:
-            print(f"[WARN] 同步失败")
-        
-        # 更新游标
-        new_cursor = result.get("data", {}).get("cursor", cursor)
-        if new_cursor and new_cursor != cursor:
-            state["last_getnote_cursor"] = new_cursor
+            print(f"[WARN] 同步失败: {result}")
         
         time.sleep(1)
     
     print(f"[INFO] 同步统计: 成功 {sync_count} 条, 跳过 {skip_count} 条")
-    state["processed_getnote_ids"] = list(processed_ids)[-100:]
+    # 保留最近 200 条记录
+    state["processed_getnote_ids"] = list(processed_ids)[-200:]
+    state["processed_getnote_hashes"] = list(processed_hashes)[-200:]
     return state
 
 
@@ -471,7 +560,7 @@ def sync_getnote_to_flomo(state):
 
 def main():
     print("=" * 50)
-    print("🔄 Get笔记 ↔ Flomo 双向同步开始 (防循环版本)")
+    print("🔄 Get笔记 ↔ Flomo 双向同步开始 (防循环版本 v2)")
     print("=" * 50)
     
     # 加载状态
