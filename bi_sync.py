@@ -78,11 +78,15 @@ def notion_request(url, body=None):
         return None
 
 
-def getnote_request(endpoint, body=None):
+def getnote_request(endpoint, body=None, method=None):
     """发送 Get 笔记 API 请求"""
     url = f"https://openapi.biji.com/open/api/v1{endpoint}"
     data = json.dumps(body).encode() if body else None
-    method = "POST" if data else "GET"
+    
+    # 根据端点自动选择方法，list 用 GET，其他用 POST
+    if method is None:
+        method = "POST" if (data or endpoint.endswith("/save")) else "GET"
+    
     req = Request(url, data=data, method=method)
     req.add_header("Authorization", f"Bearer {GETNOTE_API_KEY}")
     req.add_header("X-Client-ID", GETNOTE_CLIENT_ID)
@@ -302,7 +306,7 @@ def sync_flomo_to_getnote(state):
         result = getnote_request("/resource/note/save", {
             "title": note["title"][:100],
             "content": content,
-            "note_type": "text"
+            "note_type": "plain_text"
         })
         
         if result and result.get("success"):
@@ -329,12 +333,9 @@ def sync_getnote_to_flomo(state):
     print("📥 Get笔记 → Flomo 同步")
     print("=" * 50)
     
-    # 获取笔记列表
+    # 获取笔记列表 (使用 GET 方法)
     cursor = state.get("last_getnote_cursor", "0")
-    result = getnote_request("/resource/note/list", {
-        "since_id": cursor,
-        "limit": 20
-    })
+    result = getnote_request("/resource/note/list?since_id=0&limit=20", method="GET")
     
     if not result or not result.get("success"):
         print(f"[ERROR] 获取 Get 笔记失败")
