@@ -363,13 +363,20 @@ def sync_getnote_to_flomo(state):
         if not title and not content:
             continue
         
-        # 使用标题作为内容（如果内容太长）
-        display_content = content if content else title
-        display_content = display_content[:500]
+        # 拼接内容：标题作为第一句话，然后换行接主体
+        if title and content:
+            display_content = f"{title}\n\n{content}"
+        elif title:
+            display_content = title
+        else:
+            display_content = content
         
-        # 用 AI 匹配标签
+        display_content = display_content[:1000]  # 限制长度
+        
+        # 用 AI 匹配标签（基于原始内容）
         print(f"[INFO] AI 匹配标签...")
-        matched_tags = match_tags_with_ai(display_content, FLOMO_TAGS)
+        ai_content = content if content else title
+        matched_tags = match_tags_with_ai(ai_content[:500], FLOMO_TAGS)
         
         if matched_tags:
             tags_str = " ".join(["#" + tag for tag in matched_tags])
