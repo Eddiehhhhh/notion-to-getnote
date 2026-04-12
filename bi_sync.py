@@ -326,29 +326,19 @@ def sync_flomo_to_getnote(state):
         if page.get("id") in processed_ids:
             continue
         
-        # ===== 防护2：跳过已有 "✅来自Flomo" 标签的笔记 =====
-        if "✅来自Flomo" in tags:
-            print(f"[SKIP] 跳过已有同步标记的笔记: {title[:30]}...")
+        # ===== 防护2：跳过以 ✅ 开头的笔记 =====
+        # 这些笔记是从 Get笔记 同步到 Flomo，又被同步到 Notion 的
+        # 格式：✅ #标签1 #标签2  实际标题...
+        if title.startswith(MARKER_SYNCED_TO_FLOMO):
+            print(f"[SKIP-2] 来自Get笔记标记: {title[:50]}...")
             processed_ids.add(page.get("id"))
             continue
         
-        # ===== 防护3：跳过已有 "✅已同步Flomo" 标签的笔记（防止循环回来的） =====
-        if "✅已同步Flomo" in tags:
-            print(f"[SKIP] 跳过已从Get笔记同步的笔记: {title[:30]}...")
-            processed_ids.add(page.get("id"))
-            continue
-        
-        # ===== 防护4：跳过包含 [getnote-sync] 标记的笔记 =====
-        # 这些笔记是从 Get笔记 同步到 Flomo，又被同步到 Notion 的，不需要再同步回 Get笔记
+        # ===== 防护3：跳过包含 [getnote-sync] 标记的笔记 =====
+        # 这些笔记是从 Get笔记 同步到 Flomo，又被同步到 Notion 的
         full_text = f"{title} {link}"
         if MARKER_GETNOTE_SOURCE in full_text:
-            print(f"[SKIP-4] 来自Get笔记标记: {title[:30]}...")
-            processed_ids.add(page.get("id"))
-            continue
-        
-        # ===== 防护5：内容哈希去重 =====
-        if content_hash in processed_hashes:
-            print(f"[SKIP-5] 跳过内容重复的笔记: {title[:30]}...")
+            print(f"[SKIP-3] 来自Get笔记标记: {title[:50]}...")
             processed_ids.add(page.get("id"))
             continue
         
