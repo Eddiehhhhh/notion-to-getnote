@@ -521,9 +521,9 @@ def sync_getnote_to_flomo(state):
         # 添加 [getnote-sync:ID] 标记，用于识别循环同步
         if matched_tags:
             tags_str = " ".join(["#" + tag for tag in matched_tags])
-            final_content = f"{MARKER_SYNCED_TO_FLOMO} {tags_str}\n\n{display_content}{sync_marker}"
+            final_content = f"{MARKER_SYNCED_TO_FLOMO} {tags_str}\n{display_content}{sync_marker}"
         else:
-            final_content = f"{MARKER_SYNCED_TO_FLOMO}\n\n{display_content}{sync_marker}"
+            final_content = f"{MARKER_SYNCED_TO_FLOMO}\n{display_content}{sync_marker}"
         
         # 发送到 Flomo
         print(f"[INFO] 发送到 Flomo...")
