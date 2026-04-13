@@ -326,10 +326,11 @@ def sync_flomo_to_getnote(state):
         if page.get("id") in processed_ids:
             continue
         
-        # ===== 防护2：跳过以 来源/get笔记 开头的笔记 =====
+        # ===== 防护2：跳过来自 Get笔记 的笔记（兼容新旧标记） =====
         # 这些笔记是从 Get笔记 同步到 Flomo，又被同步到 Notion 的
-        # 格式：来源/get笔记 #标签1 #标签2  实际标题...
-        if title.startswith(MARKER_SYNCED_TO_FLOMO):
+        # 新格式：来源/get笔记 #标签1 #标签2  实际标题...
+        # 旧格式：✅ #标签1 #标签2  实际标题...
+        if title.startswith("来源/get笔记") or title.startswith("✅"):
             print(f"[SKIP-2] 来自Get笔记标记: {title[:50]}...")
             processed_ids.add(page.get("id"))
             continue
