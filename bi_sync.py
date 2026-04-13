@@ -55,7 +55,7 @@ FLOMO_TAGS = []
 MARKER_FROM_FLOMO = "🔄"
 
 # 标记：已同步到 Flomo 的笔记（同步到 Flomo 时添加，防止循环）
-MARKER_SYNCED_TO_FLOMO = "✅"
+MARKER_SYNCED_TO_FLOMO = "来源/get笔记"
 
 # 同步来源标记：用于标记笔记是从 Get笔记 同步到 Flomo 的
 # 格式：[getnote-sync:ID]，用于识别循环同步
@@ -326,9 +326,9 @@ def sync_flomo_to_getnote(state):
         if page.get("id") in processed_ids:
             continue
         
-        # ===== 防护2：跳过以 ✅ 开头的笔记 =====
+        # ===== 防护2：跳过以 来源/get笔记 开头的笔记 =====
         # 这些笔记是从 Get笔记 同步到 Flomo，又被同步到 Notion 的
-        # 格式：✅ #标签1 #标签2  实际标题...
+        # 格式：来源/get笔记 #标签1 #标签2  实际标题...
         if title.startswith(MARKER_SYNCED_TO_FLOMO):
             print(f"[SKIP-2] 来自Get笔记标记: {title[:50]}...")
             processed_ids.add(page.get("id"))
