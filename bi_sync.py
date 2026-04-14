@@ -271,10 +271,16 @@ def sync_flomo_to_getnote(state):
     print("📤 Flomo → Get笔记 同步")
     print("=" * 50)
     
-    # 计算时间范围（过去 1 小时内，避免重复处理）
+    # 加载已处理的笔记 ID
+    processed_ids = set(state.get("processed_notion_ids", []))
+    processed_hashes = set(state.get("processed_notion_hashes", []))
+    print(f"[INFO] 已处理笔记数: {len(processed_ids)}")
+    
+    # 计算时间范围（过去 24 小时内，确保不漏掉任何笔记）
     now = datetime.now(timezone.utc)
-    start_time = now - timedelta(hours=1)
+    start_time = now - timedelta(hours=24)
     start_str = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(f"[INFO] 查询过去 24 小时的笔记（从 {start_str} 开始）")
     
     # 查询最近的笔记
     filter_body = {
@@ -292,7 +298,7 @@ def sync_flomo_to_getnote(state):
     
     data = notion_request(
         f"https://api.notion.com/v1/databases/{NOTION_DB_ID}/query",
-        {"filter": filter_body, "page_size": 50, "sorts": [{"timestamp": "created_time", "direction": "descending"}]}
+        {"filter": filter_body, "page_size": 100, "sorts": [{"timestamp": "created_time", "direction": "descending"}]}
     )
     
     if not data or not data.get("results"):
@@ -301,8 +307,7 @@ def sync_flomo_to_getnote(state):
     
     # 收集需要同步的笔记
     notes_to_sync = []
-    processed_ids = set(state.get("processed_notion_ids", []))
-    processed_hashes = set(state.get("processed_notion_hashes", []))
+    skip_count = {"already_processed": 0, "from_getnote": 0, "other": 0}
     
     for page in data["results"]:
         props = page.get("properties", {})
@@ -324,6 +329,7 @@ def sync_flomo_to_getnote(state):
         
         # ===== 防护1：跳过已处理的 ID =====
         if page.get("id") in processed_ids:
+            skip_count["already_processed"] += 1
             continue
         
         # ===== 防护2：跳过来自 Get笔记 的笔记（兼容新旧标记） =====
@@ -331,16 +337,18 @@ def sync_flomo_to_getnote(state):
         # 新格式：来源/get笔记 #标签1 #标签2  实际标题...
         # 旧格式：✅ #标签1 #标签2  实际标题...
         if title.startswith("来源/get笔记") or title.startswith("✅"):
-            print(f"[SKIP-2] 来自Get笔记标记: {title[:50]}...")
+            print(f"[SKIP-2] 来自Get笔记: {title[:50]}...")
             processed_ids.add(page.get("id"))
+            skip_count["from_getnote"] += 1
             continue
         
         # ===== 防护3：跳过包含 [getnote-sync] 标记的笔记 =====
         # 这些笔记是从 Get笔记 同步到 Flomo，又被同步到 Notion 的
         full_text = f"{title} {link}"
         if MARKER_GETNOTE_SOURCE in full_text:
-            print(f"[SKIP-3] 来自Get笔记标记: {title[:50]}...")
+            print(f"[SKIP-3] 来自Get笔记: {title[:50]}...")
             processed_ids.add(page.get("id"))
+            skip_count["from_getnote"] += 1
             continue
         
         if title:
@@ -353,10 +361,10 @@ def sync_flomo_to_getnote(state):
             })
     
     if not notes_to_sync:
-        print(f"[INFO] 没有新的笔记需要同步")
+        print(f"[INFO] 没有新的笔记需要同步（跳过: 已处理{skip_count['already_processed']}条, 来自Get笔记{skip_count['from_getnote']}条）")
         return state
     
-    print(f"[INFO] 发现 {len(notes_to_sync)} 条新笔记")
+    print(f"[INFO] 发现 {len(notes_to_sync)} 条新笔记（将同步），跳过: 已处理{skip_count['already_processed']}条, 来自Get笔记{skip_count['from_getnote']}条）")
     
     for note in notes_to_sync:
         # 构建内容（添加 🔄 标记，表示来自 Flomo）
@@ -377,7 +385,7 @@ def sync_flomo_to_getnote(state):
         })
         
         if result and result.get("success"):
-            print(f"[INFO] 同步成功")
+            print(f"[OK] 同步成功: {note['title'][:40]}...")
             processed_ids.add(note["id"])
             processed_hashes.add(note["content_hash"])
         else:
