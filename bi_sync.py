@@ -4,11 +4,11 @@ Get笔记 ↔ Flomo 双向同步 - 防循环版本 v2
 =========================================
 核心逻辑：
 1. Flomo → Get笔记：从 Notion 碎片中心读取，跳过带"✅来自Flomo"标签的笔记
-2. Get笔记 → Flomo：跳过带🔄标记/flomo URL/✅已同步Flomo标签的笔记，防止循环
+2. Get笔记 → Flomo：跳过带🟢标记/flomo URL/#来源/get笔记标记的笔记，防止循环
 
 防护机制（多层保险）：
 1. 内容哈希去重（不只是 ID）
-2. 标记跳过：🔄、✅已同步Flomo、flomo URL
+2. 标记跳过：🟢、#来源/get笔记、flomo URL
 3. 来源跳过：source="flomo"
 4. 状态持久化：processed_hashes 记录已同步的内容哈希
 
@@ -16,10 +16,10 @@ Get笔记 ↔ Flomo 双向同步 - 防循环版本 v2
   Flomo ──(用户同步)──▶ Notion 碎片中心
                                  │
                                  ▼
-                          Notion → Get笔记 (加 🔄 标记)
+                          Notion → Get笔记 (加 🟢 标记)
                                  │
                                  ▼
-                          Get笔记 → Flomo (跳过 🔄 标记)
+                          Get笔记 → Flomo (跳过 🟢 标记)
 """
 
 import json
@@ -293,7 +293,7 @@ def sync_flomo_to_getnote(state):
     1. 跳过已有 "✅来自Flomo" 标签的笔记
     2. 跳过已有 "✅已同步Flomo" 标签的笔记（防止循环回来的）
     3. 内容哈希去重（即使 ID 不同，内容相同也不重复同步）
-    4. 同步时在 Get笔记 中添加 🔄 标记
+    4. 同步时在 Get笔记 中添加 🟢 标记
     """
     print("\n" + "=" * 50)
     print("📤 Flomo → Get笔记 同步")
@@ -482,7 +482,7 @@ def sync_getnote_to_flomo(state):
     防护逻辑（多层保险）：
     1. source="flomo" - 直接跳过
     2. 包含 flomo URL - 跳过
-    3. 包含 🔄 标记 - 跳过（来自 Flomo 的）
+    3. 包含 🟢 标记 - 跳过（来自 Flomo 的）
     4. 包含 ✅ 已同步Flomo 标记 - 跳过
     5. 内容哈希去重 - 即使 ID 不同，内容相同也不重复
     
@@ -551,7 +551,7 @@ def sync_getnote_to_flomo(state):
             processed_ids.add(note_id)
             continue
         
-        # ===== 防护3：跳过包含 🔄 标记的笔记 =====
+        # ===== 防护3：跳过包含 🟢 标记的笔记 =====
         # 这些笔记是从 Flomo 同步过来的，避免循环同步回 Flomo
         if MARKER_FROM_FLOMO in title or MARKER_FROM_FLOMO in content:
             print(f"[SKIP-3] 来自Flomo标记: {title[:30] if title else content[:30]}...")
