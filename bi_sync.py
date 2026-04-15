@@ -55,7 +55,8 @@ FLOMO_TAGS = []
 MARKER_FROM_FLOMO = "🔄"
 
 # 标记：已同步到 Flomo 的笔记（同步到 Flomo 时添加，防止循环）
-MARKER_SYNCED_TO_FLOMO = "来源/get笔记"
+# 加上 # 前缀，这样 Flomo 才能把它识别为一个完整的标签
+MARKER_SYNCED_TO_FLOMO = "#来源/get笔记"
 
 # 同步来源标记：用于标记笔记是从 Get笔记 同步到 Flomo 的
 # 格式：[getnote-sync:ID]，用于识别循环同步
@@ -334,9 +335,10 @@ def sync_flomo_to_getnote(state):
         
         # ===== 防护2：跳过来自 Get笔记 的笔记（兼容新旧标记） =====
         # 这些笔记是从 Get笔记 同步到 Flomo，又被同步到 Notion 的
-        # 新格式：来源/get笔记 #标签1 #标签2  实际标题...
-        # 旧格式：✅ #标签1 #标签2  实际标题...
-        if title.startswith("来源/get笔记") or title.startswith("✅"):
+        # 新格式：#来源/get笔记 #标签1 #标签2  实际标题...
+        # 旧格式：来源/get笔记 #标签1 #标签2  实际标题...（无#版本）
+        # 旧旧格式：✅ #标签1 #标签2  实际标题...
+        if "#来源/get笔记" in title or "来源/get笔记" in title or title.startswith("✅"):
             print(f"[SKIP-2] 来自Get笔记: {title[:50]}...")
             processed_ids.add(page.get("id"))
             skip_count["from_getnote"] += 1
@@ -376,13 +378,20 @@ def sync_flomo_to_getnote(state):
         
         content = "\n".join(content_parts)
         
-        # 保存到 Get 笔记
-        print(f"[INFO] 同步笔记: {note['title'][:30]}...")
-        result = getnote_request("/resource/note/save", {
+        # 构建请求参数，包含标签
+        save_params = {
             "title": note["title"][:100],
             "content": content,
             "note_type": "plain_text"
-        })
+        }
+        
+        # 如果有标签，添加到请求参数
+        if note["tags"]:
+            save_params["tags"] = note["tags"]
+        
+        # 保存到 Get 笔记
+        print(f"[INFO] 同步笔记: {note['title'][:30]}... 标签: {note['tags']}")
+        result = getnote_request("/resource/note/save", save_params)
         
         if result and result.get("success"):
             print(f"[OK] 同步成功: {note['title'][:40]}...")
