@@ -52,7 +52,7 @@ FLOMO_TAGS = []
 
 # ============ 同步防护标记 ============
 # 标记：来自 Flomo 的笔记（同步到 Get笔记 时添加）
-MARKER_FROM_FLOMO = "🔄"
+MARKER_FROM_FLOMO = "🟢"
 
 # 标记：已同步到 Flomo 的笔记（同步到 Flomo 时添加，防止循环）
 # 加上 # 前缀，这样 Flomo 才能把它识别为一个完整的标签
@@ -447,7 +447,7 @@ def sync_flomo_to_getnote(state):
             "title": final_title,
             "content": content,
             "note_type": "plain_text",
-            "knowledge_space": "flomol"  # 归入 flomol 知识库
+            "knowledge_space": "flomo"  # 归入 flomo 知识库
         }
         
         # 如果有标签，添加到请求参数
