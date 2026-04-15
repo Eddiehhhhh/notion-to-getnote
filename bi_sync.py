@@ -551,9 +551,9 @@ def sync_getnote_to_flomo(state):
             processed_ids.add(note_id)
             continue
         
-        # ===== 防护3：跳过包含 🟢 标记的笔记 =====
+        # ===== 防护3：跳过包含 🟢 或 🔄 标记的笔记（兼容新旧） =====
         # 这些笔记是从 Flomo 同步过来的，避免循环同步回 Flomo
-        if MARKER_FROM_FLOMO in title or MARKER_FROM_FLOMO in content:
+        if MARKER_FROM_FLOMO in title or MARKER_FROM_FLOMO in content or "🔄" in title or "🔄" in content:
             print(f"[SKIP-3] 来自Flomo标记: {title[:30] if title else content[:30]}...")
             processed_ids.add(note_id)
             continue
