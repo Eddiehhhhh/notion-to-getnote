@@ -215,6 +215,33 @@ def fetch_flomo_tags():
     return FLOMO_TAGS
 
 
+# ============ AI 生成标题 ============
+
+def generate_title_with_ai(content):
+    """用 AI 根据内容生成一个简短的标题（10字以内）"""
+    prompt = f"""根据以下笔记内容，生成一个简短的标题（最多10个字）。
+
+笔记内容：
+{content[:500]}
+
+要求：
+1. 标题要简洁，能概括主要内容
+2. 直接返回标题，不要任何解释
+3. 如果内容太短或无法概括，返回"无标题"
+
+直接返回标题："""
+
+    response = deepseek_chat([
+        {"role": "user", "content": prompt}
+    ])
+    
+    if not response:
+        return None
+    
+    title = response.strip()[:15]  # 限制在15字以内
+    return title if title and title != "无标题" else None
+
+
 # ============ AI 标签匹配 ============
 
 def match_tags_with_ai(content, available_tags):
@@ -325,8 +352,34 @@ def sync_flomo_to_getnote(state):
         # 提取链接
         link = props.get("Link", {}).get("url", "")
         
+        # 提取原始内容（从 Notion 页面的 blocks 中获取）
+        raw_content = ""
+        try:
+            page_id = page.get("id")
+            page_data = notion_request(f"https://api.notion.com/v1/blocks/{page_id}/children?page_size=50")
+            if page_data and page_data.get("results"):
+                for block in page_data["results"]:
+                    if block.get("type") == "paragraph":
+                        texts = block.get("paragraph", {}).get("rich_text", [])
+                        raw_content += "".join([t.get("plain_text", "") for t in texts])
+                    elif block.get("type") == "heading_1":
+                        texts = block.get("heading_1", {}).get("rich_text", [])
+                        raw_content += "# " + "".join([t.get("plain_text", "") for t in texts]) + "\n"
+                    elif block.get("type") == "heading_2":
+                        texts = block.get("heading_2", {}).get("rich_text", [])
+                        raw_content += "## " + "".join([t.get("plain_text", "") for t in texts]) + "\n"
+                    elif block.get("type") == "bulleted_list_item":
+                        texts = block.get("bulleted_list_item", {}).get("rich_text", [])
+                        raw_content += "- " + "".join([t.get("plain_text", "") for t in texts]) + "\n"
+        except Exception as e:
+            print(f"[WARN] 获取页面内容失败: {e}")
+        
+        # 如果没有提取到内容，用标题作为内容
+        if not raw_content:
+            raw_content = title
+        
         # 计算内容哈希
-        content_hash = compute_content_hash(title, link)
+        content_hash = compute_content_hash(title, raw_content)
         
         # ===== 防护1：跳过已处理的 ID =====
         if page.get("id") in processed_ids:
@@ -357,6 +410,7 @@ def sync_flomo_to_getnote(state):
             notes_to_sync.append({
                 "id": page.get("id"),
                 "title": title,
+                "raw_content": raw_content,
                 "tags": tags,
                 "link": link,
                 "content_hash": content_hash
@@ -369,20 +423,31 @@ def sync_flomo_to_getnote(state):
     print(f"[INFO] 发现 {len(notes_to_sync)} 条新笔记（将同步），跳过: 已处理{skip_count['already_processed']}条, 来自Get笔记{skip_count['from_getnote']}条）")
     
     for note in notes_to_sync:
-        # 构建内容（添加 🔄 标记，表示来自 Flomo）
-        content_parts = [f"{MARKER_FROM_FLOMO}{note['title']}"]
+        # 用AI生成标题（基于原始内容）
+        raw_content = note.get("raw_content", note["title"])
+        print(f"[INFO] AI生成标题: {raw_content[:50]}...")
+        ai_title = generate_title_with_ai(raw_content)
+        
+        # 如果AI生成失败，用截取内容前30字作为标题
+        final_title = ai_title if ai_title else raw_content[:30]
+        
+        # 构建正文（包含来源信息和标签）
+        content_parts = []
         if note["tags"]:
-            content_parts.append(f"\n标签: {' '.join(['#' + t for t in note['tags']])}")
+            content_parts.append(f"标签: {' '.join(['#' + t for t in note['tags']])}")
         if note["link"]:
-            content_parts.append(f"\n来源: {note['link']}")
+            content_parts.append(f"来源: {note['link']}")
+        content_parts.append(f"---")
+        content_parts.append(raw_content)  # 完整内容
         
         content = "\n".join(content_parts)
         
-        # 构建请求参数，包含标签
+        # 构建请求参数
         save_params = {
-            "title": note["title"][:100],
+            "title": final_title,
             "content": content,
-            "note_type": "plain_text"
+            "note_type": "plain_text",
+            "knowledge_space": "flomol"  # 归入 flomol 知识库
         }
         
         # 如果有标签，添加到请求参数
@@ -390,11 +455,11 @@ def sync_flomo_to_getnote(state):
             save_params["tags"] = note["tags"]
         
         # 保存到 Get 笔记
-        print(f"[INFO] 同步笔记: {note['title'][:30]}... 标签: {note['tags']}")
+        print(f"[INFO] 同步笔记: {final_title}... 标签: {note['tags']}")
         result = getnote_request("/resource/note/save", save_params)
         
         if result and result.get("success"):
-            print(f"[OK] 同步成功: {note['title'][:40]}...")
+            print(f"[OK] 同步成功: {final_title}...")
             processed_ids.add(note["id"])
             processed_hashes.add(note["content_hash"])
         else:
