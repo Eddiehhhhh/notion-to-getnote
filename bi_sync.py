@@ -218,7 +218,14 @@ def fetch_flomo_tags():
 # ============ AI 生成标题 ============
 
 def generate_title_with_ai(content):
-    """用 AI 根据内容生成一个简短的标题（10字以内）"""
+    """用 AI 根据内容生成一个简短的标题（10字以内）
+    
+    注意：如果内容不超过30个字，直接返回 None（不需要 AI 总结）
+    """
+    # 内容太短，不需要 AI 总结
+    if len(content.strip()) <= 30:
+        return None
+    
     prompt = f"""根据以下笔记内容，生成一个简短的标题（最多10个字）。
 
 笔记内容：
@@ -425,8 +432,14 @@ def sync_flomo_to_getnote(state):
     for note in notes_to_sync:
         # 用AI生成标题（基于原始内容）
         raw_content = note.get("raw_content", note["title"])
-        print(f"[INFO] AI生成标题: {raw_content[:50]}...")
-        ai_title = generate_title_with_ai(raw_content)
+        
+        # 内容不超过30字：直接用内容作为标题，不调用 AI
+        if len(raw_content.strip()) <= 30:
+            ai_title = raw_content.strip()
+            print(f"[INFO] 内容≤30字，直接用原文作标题")
+        else:
+            print(f"[INFO] AI生成标题: {raw_content[:50]}...")
+            ai_title = generate_title_with_ai(raw_content)
         
         # 如果AI生成失败，用截取内容前30字作为标题
         final_title = f"🟢 {ai_title}" if ai_title else f"🟢 {raw_content[:30]}"
@@ -447,7 +460,7 @@ def sync_flomo_to_getnote(state):
             "title": final_title,
             "content": content,
             "note_type": "plain_text",
-            "knowledge_space": "flomo"  # 归入 flomo 知识库
+            "space_name": "flomo"  # 归入 flomo 知识库
         }
         
         # 如果有标签，添加到请求参数
