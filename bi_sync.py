@@ -429,7 +429,7 @@ def sync_flomo_to_getnote(state):
         ai_title = generate_title_with_ai(raw_content)
         
         # 如果AI生成失败，用截取内容前30字作为标题
-        final_title = ai_title if ai_title else raw_content[:30]
+        final_title = f"🟢 {ai_title}" if ai_title else f"🟢 {raw_content[:30]}"
         
         # 构建正文（包含来源信息和标签）
         content_parts = []
