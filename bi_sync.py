@@ -460,12 +460,13 @@ def sync_flomo_to_getnote(state):
             "title": final_title,
             "content": content,
             "note_type": "plain_text",
-            "space_name": "flomo"  # 归入 flomo 知识库
+            "space_name": "flomo"
         }
         
-        # 如果有标签，添加到请求参数
-        if note["tags"]:
-            save_params["tags"] = note["tags"]
+        # 强制添加 flomo 标签（来源标记），同时保留原有标签
+        all_tags = ["flomo"] + [t for t in note["tags"] if t != "flomo"]
+        if all_tags:
+            save_params["tags"] = all_tags
         
         # 保存到 Get 笔记
         print(f"[INFO] 同步笔记: {final_title}... 标签: {note['tags']}")
