@@ -609,13 +609,20 @@ def sync_getnote_to_flomo(state):
         # 在内容末尾添加 [getnote-sync:ID]，这样当这条笔记从 Flomo 同步回来时可以被识别
         sync_marker = f"\n\n{MARKER_GETNOTE_SOURCE}:{note_id}"
         
-        # 用 AI 匹配标签（基于原始内容）
-        print(f"[INFO] AI 匹配标签: {title[:30] if title else content[:30]}...")
-        ai_content = content if content else title
-        matched_tags = match_tags_with_ai(ai_content[:500], FLOMO_TAGS)
+        # 判断是否为录音卡转录的笔记（包含"### 📑 智能总结"）
+        is_ai_summary_note = "### 📑 智能总结" in content or "### 📑 智能总结" in title
         
-        # 添加 ✅ 标记，表示已同步到 Flomo（放在开头便于识别）
-        # 添加 [getnote-sync:ID] 标记，用于识别循环同步
+        if is_ai_summary_note:
+            # 录音卡转录笔记：只用固定两个标签，不走 AI 匹配
+            matched_tags = ["来源/get笔记", "来源/录音卡记录"]
+            print(f"[INFO] 录音卡转录笔记，只用固定标签: {matched_tags}")
+        else:
+            # 普通笔记：用 AI 匹配标签
+            print(f"[INFO] AI 匹配标签: {title[:30] if title else content[:30]}...")
+            ai_content = content if content else title
+            matched_tags = match_tags_with_ai(ai_content[:500], FLOMO_TAGS)
+        
+        # 构建最终内容
         if matched_tags:
             tags_str = " ".join(["#" + tag for tag in matched_tags])
             final_content = f"{MARKER_SYNCED_TO_FLOMO} {tags_str}\n{display_content}{sync_marker}"
